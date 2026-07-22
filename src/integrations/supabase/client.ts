@@ -15,9 +15,8 @@ if (!supabaseUrl || !supabaseKey) {
 export const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
   auth: {
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    persistSession: true,
-    autoRefreshToken: true,
+    persistSession: false, // Desativa a persistência automática para cortar o loop de refresh do token
+    autoRefreshToken: false, // Impede o cliente de tentar atualizar o token sozinho em segundo plano
     detectSessionInUrl: true,
-    flowType: 'pkce', // Usa PKCE para estabilizar o fluxo de autenticação e evitar loops de token
   },
 });
