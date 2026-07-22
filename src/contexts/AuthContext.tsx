@@ -177,7 +177,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         console.error("Error checking subscription:", error);
-        // On error, default to free plan (don't block the user)
         setSubscription({
           subscribed: false,
           productId: null,
@@ -227,25 +226,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => authSubscription.unsubscribe();
   }, []);
 
+  // Monitora apenas o ID do usuário para evitar chamadas duplicadas em loop
   useEffect(() => {
-    if (session) {
+    if (session?.user?.id) {
       checkSubscription();
     }
-  }, [session]);
-
-  useEffect(() => {
-    if (!session) return;
-    // Realtime: update plan instantly when webhook updates profile
-    const channel = supabase
-      .channel(`profile-plan-${session.user.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `user_id=eq.${session.user.id}` },
-        () => { checkSubscription(); }
-      )
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [session]);
+  }, [session?.user?.id]);
 
   const signUp = async (
     email: string,
