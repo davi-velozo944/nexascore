@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash-latest"];
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
 const money = (value: unknown) =>
   Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -113,7 +113,6 @@ serve(async (req) => {
     }
     
     if (type === "financial" || type === "all") {
-      // For now, use contracts data as financial basis
       const { data: contracts } = await supabase
         .from("contracts")
         .select("*")
