@@ -15,8 +15,9 @@ if (!supabaseUrl || !supabaseKey) {
 export const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
   auth: {
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    persistSession: false,
-    autoRefreshToken: false,
+    persistSession: true, // Mantém a sessão salva para liberar o acesso aos relatórios
+    autoRefreshToken: true, // Atualiza o token automaticamente em segundo plano
     detectSessionInUrl: true,
+    flowType: 'pkce', // Essencial para estabilizar as requisições e evitar o erro 429
   },
 });
