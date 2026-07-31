@@ -6,46 +6,45 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
-
 const money = (value: unknown) =>
   Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 async function callGemini(apiKey: string, systemPrompt: string, userPrompt: string) {
-  let lastError = "Modelo Gemini indisponível";
+  const model = "gemini-1.5-flash";
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-  for (const model of GEMINI_MODELS) {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const response = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-        generationConfig: { temperature: 0.6 },
-      }),
-    });
+  const response = await fetch(geminiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      generationConfig: { temperature: 0.6 },
+    }),
+  });
 
-    if (response.ok) {
-      const aiData = await response.json();
-      const reportText = aiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (reportText) return { reportText, model };
-      lastError = `Resposta vazia do modelo ${model}`;
-      continue;
-    }
-
+  if (!response.ok) {
     const errorText = await response.text();
-    lastError = `Gemini ${model} retornou ${response.status}: ${errorText}`;
-    console.error("Gemini error:", { model, status: response.status, errorText });
-
-    if (![404, 429].includes(response.status)) break;
+    console.error("Gemini error:", { status: response.status, errorText });
+    
+    if (response.status === 429 || errorText.includes("RESOURCE_EXHAUSTED") || errorText.includes("Quota")) {
+      throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou utilize uma nova chave no AI Studio.");
+    }
+    
+    throw new Error(`Erro na API do Gemini (${response.status}): ${errorText}`);
   }
 
-  if (lastError.includes("429") || lastError.includes("RESOURCE_EXHAUSTED") || lastError.includes("Quota")) {
-    throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou utilize uma nova chave no AI Studio.");
+  const aiData = await response.json();
+  const reportText = aiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+  
+  if (!reportText) {
+    throw new Error("O modelo retornou uma resposta vazia.");
   }
 
-  throw new Error(lastError);
+  return { reportText, model };
 }
 
 serve(async (req) => {
@@ -64,7 +63,6 @@ serve(async (req) => {
       });
     }
 
-    // Get user from auth header
     const authHeader = req.headers.get("Authorization")?.replace("Bearer ", "");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -86,7 +84,6 @@ serve(async (req) => {
       });
     }
 
-    // Fetch relevant data based on report type
     let contextData = "";
     
     if (type === "contracts" || type === "all") {
@@ -171,8 +168,6 @@ REGRAS OBRIGATÓRIAS:
 - NUNCA inclua o campo "Analista", "Responsável", "Autor", "Elaborado por" ou qualquer assinatura/identificação de quem fez o relatório. O relatório não tem autor.`;
 
     const userPrompt = `Gere um relatório ${type === 'all' ? 'completo' : `de ${type}`} baseado nos seguintes dados:${contextData}\n\nData/hora atual de referência: ${nowBr}`;
-
-    console.log("Generating report for type:", type);
 
     const { reportText, model } = await callGemini(GEMINI_API_KEY, systemPrompt, userPrompt);
 
