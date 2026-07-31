@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash"];
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
 
 const money = (value: unknown) =>
   Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -20,7 +20,7 @@ async function callGemini(apiKey: string, systemPrompt: string, userPrompt: stri
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
+        system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: userPrompt }] }],
         generationConfig: { temperature: 0.6 },
       }),
@@ -42,7 +42,7 @@ async function callGemini(apiKey: string, systemPrompt: string, userPrompt: stri
   }
 
   if (lastError.includes("429") || lastError.includes("RESOURCE_EXHAUSTED") || lastError.includes("Quota")) {
-    throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou habilite faturamento/aumente a cota no Google AI Studio.");
+    throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou utilize uma nova chave no AI Studio.");
   }
 
   throw new Error(lastError);
@@ -103,7 +103,7 @@ serve(async (req) => {
         ).join('\n');
         
         const totalValue = contracts.reduce((sum, c) => sum + Number(c.contract_value || 0), 0);
-        const activeContracts = contracts.filter(c => c.status === 'active').length;
+        const activeContracts = contracts.filter(c => c.status === 'active' || c.status === 'ativo').length;
         const highRisk = contracts.filter(c => c.risk_level === 'high').length;
         
         contextData += `\n\nResumo: Valor total: ${money(totalValue)}, Ativos: ${activeContracts}, Alto risco: ${highRisk}`;
@@ -116,16 +116,17 @@ serve(async (req) => {
       const { data: contracts } = await supabase
         .from("contracts")
         .select("*")
-        .eq("user_id", user.id)
-        .eq("status", "active");
+        .eq("user_id", user.id);
       
-      if (contracts && contracts.length > 0) {
-        const totalRevenue = contracts.reduce((sum, c) => sum + Number(c.contract_value || 0), 0);
-        const avgValue = totalRevenue / contracts.length;
+      const activeContracts = contracts?.filter(c => c.status === 'active' || c.status === 'ativo') || [];
+      
+      if (activeContracts.length > 0) {
+        const totalRevenue = activeContracts.reduce((sum, c) => sum + Number(c.contract_value || 0), 0);
+        const avgValue = totalRevenue / activeContracts.length;
         
         contextData += `\n\nFINANCEIRO:\n`;
         contextData += `- Receita total prevista: ${money(totalRevenue)}\n`;
-        contextData += `- Contratos ativos: ${contracts.length}\n`;
+        contextData += `- Contratos ativos: ${activeContracts.length}\n`;
         contextData += `- Ticket médio: ${money(avgValue)}\n`;
       } else {
         contextData += "\n\nNenhum dado financeiro disponível.";
@@ -145,7 +146,7 @@ serve(async (req) => {
           const existing = clientMap.get(clientName) || { total: 0, count: 0, active: 0 };
           existing.total += Number(c.contract_value || 0);
           existing.count += 1;
-          if (c.status === 'active') existing.active += 1;
+          if (c.status === 'active' || c.status === 'ativo') existing.active += 1;
           clientMap.set(clientName, existing);
         });
         
