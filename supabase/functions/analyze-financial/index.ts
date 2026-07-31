@@ -6,46 +6,45 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
-
 const money = (value: unknown) =>
   Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 async function callGemini(apiKey: string, systemPrompt: string, userPrompt: string) {
-  let lastError = "Modelo Gemini indisponível";
+  const model = "gemini-1.5-flash";
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-  for (const model of GEMINI_MODELS) {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const response = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-        generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
-      }),
-    });
+  const response = await fetch(geminiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
+    }),
+  });
 
-    if (response.ok) {
-      const aiData = await response.json();
-      const reportText = aiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (reportText) return { reportText, model };
-      lastError = `Resposta vazia do modelo ${model}`;
-      continue;
-    }
-
+  if (!response.ok) {
     const errorText = await response.text();
-    lastError = `Gemini ${model} retornou ${response.status}: ${errorText}`;
-    console.error("Gemini error:", { model, status: response.status, errorText });
-
-    if (![404, 429].includes(response.status)) break;
+    console.error("Gemini error:", { status: response.status, errorText });
+    
+    if (response.status === 429 || errorText.includes("RESOURCE_EXHAUSTED") || errorText.includes("Quota")) {
+      throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou utilize uma nova chave no AI Studio.");
+    }
+    
+    throw new Error(`Erro na API do Gemini (${response.status}): ${errorText}`);
   }
 
-  if (lastError.includes("429") || lastError.includes("RESOURCE_EXHAUSTED") || lastError.includes("Quota")) {
-    throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou utilize uma nova chave no AI Studio.");
+  const aiData = await response.json();
+  const reportText = aiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+  
+  if (!reportText) {
+    throw new Error("O modelo retornou uma resposta vazia.");
   }
 
-  throw new Error(lastError);
+  return { reportText, model };
 }
 
 serve(async (req) => {
