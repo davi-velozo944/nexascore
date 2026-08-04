@@ -20,6 +20,7 @@ import {
   UserCheck,
   Landmark,
   KanbanSquare,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -47,7 +48,7 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, loading, signOut, subscription } = useAuth();
+  const { user, loading, signOut, subscription, isAdmin } = useAuth();
   const { t } = useLocale();
 
   // Check for test mode query param
@@ -142,6 +143,26 @@ export default function DashboardLayout() {
                 </Link>
               );
             })}
+
+            {/* Admin Link Condicional */}
+            {isAdmin && (
+              <Link
+                to="/dashboard/admin"
+                onClick={() => setSidebarOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                  location.pathname === "/dashboard/admin"
+                    ? "bg-sidebar-accent text-sidebar-primary shadow-nexa-glow-sm"
+                    : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+                )}
+              >
+                <Shield className={cn("h-5 w-5", location.pathname === "/dashboard/admin" && "text-sidebar-primary")} />
+                {t("admin") || "Admin"}
+                {location.pathname === "/dashboard/admin" && (
+                  <div className="ml-auto h-2 w-2 rounded-full bg-sidebar-primary" />
+                )}
+              </Link>
+            )}
           </nav>
 
           {/* Subscription Badge */}
@@ -224,3 +245,4 @@ export default function DashboardLayout() {
     </div>
   );
 }
+            
