@@ -33,7 +33,7 @@ import {
   Loader2,
 } from "lucide-react";
 
-type PlanKey = "gratis" | "bronze" | "prata" | "ouro";
+type PlanKey = "gratis" | "inicial" | "Profissional" | "Premium";
 
 const PLAN_PRICES: Record<PlanKey, number> = {
   gratis: 0,
