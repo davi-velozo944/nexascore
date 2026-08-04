@@ -1,183 +1,55 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const money = (value: unknown) =>
-  Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
-async function callGemini(apiKey: string, systemPrompt: string, userPrompt: string) {
-  const model = "gemini-1.5-flash";
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-  const response = await fetch(geminiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-goog-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.6 },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Gemini error:", { status: response.status, errorText });
-    
-    if (response.status === 429 || errorText.includes("RESOURCE_EXHAUSTED") || errorText.includes("Quota")) {
-      throw new Error("Cota da API Gemini excedida ou sem billing ativo. Aguarde alguns minutos ou utilize uma nova chave no AI Studio.");
-    }
-    
-    throw new Error(`Erro na API do Gemini (${response.status}): ${errorText}`);
-  }
-
-  const aiData = await response.json();
-  const reportText = aiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-  
-  if (!reportText) {
-    throw new Error("O modelo retornou uma resposta vazia.");
-  }
-
-  return { reportText, model };
-}
-
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
+  if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { type = "all" } = await req.json().catch(() => ({ type: "all" }));
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    const { promptData, prompt } = await req.json();
+    const userPrompt = promptData || prompt;
 
-    if (!GEMINI_API_KEY) {
-      return new Response(JSON.stringify({ error: "GEMINI_API_KEY não configurada no backend." }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const grokApiKey = Deno.env.get("GROK_API_KEY");
+    if (!grokApiKey) {
+      throw new Error("GROK_API_KEY não configurada no Supabase.");
     }
 
-    const authHeader = req.headers.get("Authorization")?.replace("Bearer ", "");
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const response = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${grokApiKey}`,
+      },
+      body: JSON.stringify({
+        model: "grok-beta",
+        messages: [
+          {
+            role: "system",
+            content: "Você é o assistente de IA financeiro do NexaScore, especializado em gerar análises e relatórios detalhados.",
+          },
+          {
+            role: "user",
+            content: userPrompt,
+          },
+        ],
+        temperature: 0.7,
+      }),
+    });
 
-    if (!supabaseUrl || !supabaseKey) {
-      return new Response(JSON.stringify({ error: "Variáveis do banco não configuradas no backend." }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const data = await response.json();
+    const resultText = data.choices[0]?.message?.content || "";
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader);
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Não autorizado" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    let contextData = "";
-    
-    if (type === "contracts" || type === "all") {
-      const { data: contracts } = await supabase
-        .from("contracts")
-        .select("*")
-        .eq("user_id", user.id)
-        .limit(100);
-      
-      if (contracts && contracts.length > 0) {
-        contextData += `\n\nCONTRATOS (${contracts.length} total):\n`;
-        contextData += contracts.map(c => 
-          `- ${c.client_name || c.title || "Cliente não informado"}: ${money(c.contract_value)}, ${c.duration_months || "N/A"} meses, Status: ${c.status || "N/A"}, Risco: ${c.risk_level || 'N/A'}`
-        ).join('\n');
-        
-        const totalValue = contracts.reduce((sum, c) => sum + Number(c.contract_value || 0), 0);
-        const activeContracts = contracts.filter(c => c.status === 'active' || c.status === 'ativo').length;
-        const highRisk = contracts.filter(c => c.risk_level === 'high').length;
-        
-        contextData += `\n\nResumo: Valor total: ${money(totalValue)}, Ativos: ${activeContracts}, Alto risco: ${highRisk}`;
-      } else {
-        contextData += "\n\nNenhum contrato encontrado.";
-      }
-    }
-    
-    if (type === "financial" || type === "all") {
-      const { data: contracts } = await supabase
-        .from("contracts")
-        .select("*")
-        .eq("user_id", user.id);
-      
-      const activeContracts = contracts?.filter(c => c.status === 'active' || c.status === 'ativo') || [];
-      
-      if (activeContracts.length > 0) {
-        const totalRevenue = activeContracts.reduce((sum, c) => sum + Number(c.contract_value || 0), 0);
-        const avgValue = totalRevenue / activeContracts.length;
-        
-        contextData += `\n\nFINANCEIRO:\n`;
-        contextData += `- Receita total prevista: ${money(totalRevenue)}\n`;
-        contextData += `- Contratos ativos: ${activeContracts.length}\n`;
-        contextData += `- Ticket médio: ${money(avgValue)}\n`;
-      } else {
-        contextData += "\n\nNenhum dado financeiro disponível.";
-      }
-    }
-    
-    if (type === "clients" || type === "all") {
-      const { data: contracts } = await supabase
-        .from("contracts")
-        .select("client_name, contract_value, status")
-        .eq("user_id", user.id);
-      
-      if (contracts && contracts.length > 0) {
-        const clientMap = new Map();
-        contracts.forEach(c => {
-          const clientName = c.client_name || "Cliente não informado";
-          const existing = clientMap.get(clientName) || { total: 0, count: 0, active: 0 };
-          existing.total += Number(c.contract_value || 0);
-          existing.count += 1;
-          if (c.status === 'active' || c.status === 'ativo') existing.active += 1;
-          clientMap.set(clientName, existing);
-        });
-        
-        contextData += `\n\nCLIENTES (${clientMap.size} únicos):\n`;
-        clientMap.forEach((data, name) => {
-          contextData += `- ${name}: ${money(data.total)} em ${data.count} contrato(s), ${data.active} ativo(s)\n`;
-        });
-      } else {
-        contextData += "\n\nNenhum cliente encontrado.";
-      }
-    }
-
-    const nowBr = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "long", timeStyle: "short" });
-
-    const systemPrompt = `Você é um assistente de análise de negócios especializado em gestão empresarial brasileira.
-Analise os dados fornecidos e gere um relatório detalhado em português do Brasil.
-Seja objetivo, use bullet points e destaque insights importantes.
-Inclua recomendações práticas baseadas nos dados.
-Formate valores monetários em Reais (R$).
-REGRAS OBRIGATÓRIAS:
-- Quando incluir data no relatório, use EXATAMENTE "${nowBr}" (horário de Brasília). Nunca invente datas.
-- NUNCA inclua o campo "Analista", "Responsável", "Autor", "Elaborado por" ou qualquer assinatura/identificação de quem fez o relatório. O relatório não tem autor.`;
-
-    const userPrompt = `Gere um relatório ${type === 'all' ? 'completo' : `de ${type}`} baseado nos seguintes dados:${contextData}\n\nData/hora atual de referência: ${nowBr}`;
-
-    const { reportText, model } = await callGemini(GEMINI_API_KEY, systemPrompt, userPrompt);
-
-    return new Response(JSON.stringify({ report: reportText, model }), {
+    return new Response(JSON.stringify({ result: resultText }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("Report generation error:", error);
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Erro desconhecido" }), {
-      status: 200,
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
